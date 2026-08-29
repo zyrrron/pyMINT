@@ -17,6 +17,7 @@ class MINTCompiler(mintListener):
         super().__init__()
         self.current_device: MINTDevice = MINTDevice("DEFAULT_NAME")
         self.current_block_id = 0
+        self.current_level_id = 0
         self.current_layer_id = 0
         self.flow_layer_count = 0
         self.control_layer_count = 0
@@ -30,6 +31,12 @@ class MINTCompiler(mintListener):
 
     def enterNetlist(self, ctx: mintParser.NetlistContext):
         self.current_device = MINTDevice("DEFAULT_NAME")
+        self.current_block_id = 0
+        self.current_level_id = 0
+        self.current_layer_id = 0
+        self.flow_layer_count = 0
+        self.control_layer_count = 0
+        self.integration_layer_count = 0
         self._imported_modules = set()
         self._pending_ufmodule_instances = []
 
@@ -56,10 +63,12 @@ class MINTCompiler(mintListener):
             raise Exception(
                 "Error Initializing the device. Could not find the current device"
             )
+        if self.flow_layer_count > 0:
+            self.current_level_id += 1
         layer = self.current_device.create_mint_layer(
             str(self.current_layer_id),
             str(self.flow_layer_count),
-            str(self.current_block_id),
+            str(self.current_level_id),
             MINTLayerType.FLOW,
         )
         self._current_layer = layer
@@ -76,7 +85,7 @@ class MINTCompiler(mintListener):
         layer = self.current_device.create_mint_layer(
             str(self.current_layer_id),
             str(self.control_layer_count),
-            str(self.current_block_id),
+            str(self.current_level_id),
             MINTLayerType.CONTROL,
         )
         self._current_layer = layer
@@ -93,7 +102,7 @@ class MINTCompiler(mintListener):
         layer = self.current_device.create_mint_layer(
             str(self.current_layer_id),
             str(self.integration_layer_count),
-            str(self.current_block_id),
+            str(self.current_level_id),
             MINTLayerType.INTEGRATION,
         )
         self._current_layer = layer
