@@ -30,6 +30,8 @@ class MINTCompiler(mintListener):
         self._bank_members: Dict[Tuple[str, str, str], str] = {}
         self._imported_modules: Set[str] = set()
         self._pending_ufmodule_instances: List[Tuple[str, str]] = []
+        # (name, params) for ``VIA`` declared in the global block, before any layer.
+        self._pending_vias: List[Tuple[str, Dict]] = []
 
     def enterNetlist(self, ctx: mintParser.NetlistContext):
         self.current_device = MINTDevice("DEFAULT_NAME")
@@ -41,6 +43,7 @@ class MINTCompiler(mintListener):
         self.integration_layer_count = 0
         self._imported_modules = set()
         self._pending_ufmodule_instances = []
+        self._pending_vias = []
         self._bank_base_names = set()
         self._bank_members = {}
 
@@ -77,6 +80,7 @@ class MINTCompiler(mintListener):
         )
         self._current_layer = layer
         self._flush_pending_ufmodule_instances_to_layer(layer)
+        self._flush_pending_vias_to_layer(layer)
         self.flow_layer_count += 1
         self.current_layer_id += 1
 
@@ -94,6 +98,7 @@ class MINTCompiler(mintListener):
         )
         self._current_layer = layer
         self._flush_pending_ufmodule_instances_to_layer(layer)
+        self._flush_pending_vias_to_layer(layer)
         self.control_layer_count += 1
         self.current_layer_id += 1
 
@@ -111,6 +116,7 @@ class MINTCompiler(mintListener):
         )
         self._current_layer = layer
         self._flush_pending_ufmodule_instances_to_layer(layer)
+        self._flush_pending_vias_to_layer(layer)
         self.integration_layer_count += 1
         self.current_layer_id += 1
 
@@ -547,22 +553,27 @@ class MINTCompiler(mintListener):
         """FLOW or CONTROL VIA: centre-hole punch on the current layer.
 
         Params (radius / portRadius / depth / …) come from ``paramsStat`` the
-        same way as PORT / NODE. Empty layer list used to drop VIAs from
-        TREE-PLACE; always attach the active layer.
+        same way as PORT / NODE. A ``VIA`` inside a layer uses that layer.
+        A global ``VIA`` (before ``LAYER``) waits for the first layer that opens.
         """
         if self.current_device is None:
             raise Exception(
                 "Error Initializing the device. Could not find the current device"
             )
-        if not (self._current_layer is not None and self._current_layer.ID is not None):
-            raise AssertionError
-        for ufname in ctx.ufnames().ufname():  # type: ignore
-            self.current_device.create_mint_component(
-                ufname.getText(),
-                "VIA",
-                self.current_params,
-                [self._current_layer.ID],
-            )
+        names = [ufname.getText() for ufname in ctx.ufnames().ufname()]  # type: ignore
+        params = dict(self.current_params)
+        if self._current_layer is not None and self._current_layer.ID is not None:
+            for name in names:
+                self.current_device.create_mint_component(
+                    name,
+                    "VIA",
+                    params,
+                    [self._current_layer.ID],
+                )
+            return
+        # Grammar allows ``VIA`` in the global block, before LAYER FLOW.
+        for name in names:
+            self._pending_vias.append((name, params))
 
     def enterTerminalStat(self, ctx: mintParser.TerminalStatContext):
         if self.current_device is None:
@@ -612,3 +623,22 @@ class MINTCompiler(mintListener):
                 [layer.ID],
             )
         self._pending_ufmodule_instances = []
+
+    def _flush_pending_vias_to_layer(self, layer: Layer) -> None:
+        """Attach global ``VIA`` declarations to the first layer that opens."""
+        if self.current_device is None:
+            raise Exception(
+                "Error Initializing the device. Could not find the current device"
+            )
+        if layer.ID is None:
+            raise AssertionError
+        if not self._pending_vias:
+            return
+        for name, params in self._pending_vias:
+            self.current_device.create_mint_component(
+                name,
+                "VIA",
+                params,
+                [layer.ID],
+            )
+        self._pending_vias = []
